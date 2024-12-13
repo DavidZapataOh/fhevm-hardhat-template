@@ -20,7 +20,7 @@ describe("ConfidentialERC20:FHEGas", function () {
   });
 
   it("gas consumed during transfer", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 10000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 10000);
     const t1 = await transaction.wait();
     expect(t1?.status).to.eq(1);
 
@@ -28,7 +28,7 @@ describe("ConfidentialERC20:FHEGas", function () {
     input.add64(1337);
     const encryptedTransferAmount = await input.encrypt();
     const tx = await this.erc20["transfer(address,bytes32,bytes)"](
-      this.signers.bob,
+      this.signers.bob.address,
       encryptedTransferAmount.handles[0],
       encryptedTransferAmount.inputProof,
     );
@@ -44,14 +44,14 @@ describe("ConfidentialERC20:FHEGas", function () {
   });
 
   it("gas consumed during transferFrom", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 10000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 10000);
     await transaction.wait();
 
     const inputAlice = this.fhevm.createEncryptedInput(this.contractAddress, this.signers.alice.address);
     inputAlice.add64(1337);
     const encryptedAllowanceAmount = await inputAlice.encrypt();
     const tx = await this.erc20["approve(address,bytes32,bytes)"](
-      this.signers.bob,
+      this.signers.bob.address,
       encryptedAllowanceAmount.handles[0],
       encryptedAllowanceAmount.inputProof,
     );
@@ -62,8 +62,8 @@ describe("ConfidentialERC20:FHEGas", function () {
     inputBob2.add64(1337); // below allowance so next tx should send token
     const encryptedTransferAmount2 = await inputBob2.encrypt();
     const tx3 = await bobErc20["transferFrom(address,address,bytes32,bytes)"](
-      this.signers.alice,
-      this.signers.bob,
+      this.signers.alice.address,
+      this.signers.bob.address,
       encryptedTransferAmount2.handles[0],
       encryptedTransferAmount2.inputProof,
     );

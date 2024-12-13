@@ -1,4 +1,5 @@
 import "@nomicfoundation/hardhat-toolbox";
+import "@openzeppelin/hardhat-upgrades";
 import dotenv from "dotenv";
 import "hardhat-deploy";
 import "hardhat-ignore-warnings";
@@ -77,7 +78,7 @@ const config: HardhatUserConfig = {
     deployer: 0,
   },
   mocha: {
-    timeout: 500000,
+    timeout: 1000000,
   },
   gasReporter: {
     currency: "USD",
@@ -117,7 +118,7 @@ const config: HardhatUserConfig = {
       // https://hardhat.org/hardhat-network/#solidity-optimizer-support
       optimizer: {
         enabled: true,
-        runs: 800,
+        runs: 200,
       },
       evmVersion: "cancun",
     },

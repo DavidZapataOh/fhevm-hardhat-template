@@ -6,10 +6,12 @@ import { reencryptEuint64 } from "../reencrypt";
 import { getSigners, initSigners } from "../signers";
 import { debug } from "../utils";
 import { deployConfidentialERC20Fixture } from "./ConfidentialERC20.fixture";
+import { awaitAllDecryptionResults, initGateway } from "../asyncDecrypt";
 
 describe("ConfidentialERC20", function () {
   before(async function () {
     await initSigners();
+    await initGateway();
     this.signers = await getSigners();
   });
 
@@ -21,7 +23,7 @@ describe("ConfidentialERC20", function () {
   });
 
   it("should mint the contract", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 1000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 1000);
     await transaction.wait();
 
     // Reencrypt Alice's balance
@@ -40,7 +42,7 @@ describe("ConfidentialERC20", function () {
   });
 
   it("should transfer tokens between two users", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 10000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 10000);
     const t1 = await transaction.wait();
     expect(t1?.status).to.eq(1);
 
@@ -48,7 +50,7 @@ describe("ConfidentialERC20", function () {
     input.add64(1337);
     const encryptedTransferAmount = await input.encrypt();
     const tx = await this.erc20["transfer(address,bytes32,bytes)"](
-      this.signers.bob,
+      this.signers.bob.address,
       encryptedTransferAmount.handles[0],
       encryptedTransferAmount.inputProof,
     );
@@ -82,14 +84,14 @@ describe("ConfidentialERC20", function () {
   });
 
   it("should not transfer tokens between two users", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 1000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 1000);
     await transaction.wait();
 
     const input = this.fhevm.createEncryptedInput(this.contractAddress, this.signers.alice.address);
     input.add64(1337);
     const encryptedTransferAmount = await input.encrypt();
     const tx = await this.erc20["transfer(address,bytes32,bytes)"](
-      this.signers.bob,
+      this.signers.bob.address,
       encryptedTransferAmount.handles[0],
       encryptedTransferAmount.inputProof,
     );
@@ -111,14 +113,14 @@ describe("ConfidentialERC20", function () {
   });
 
   it("should be able to transferFrom only if allowance is sufficient", async function () {
-    const transaction = await this.erc20.mint(this.signers.alice, 10000);
+    const transaction = await this.erc20.mint(this.signers.alice.address, 10000);
     await transaction.wait();
 
     const inputAlice = this.fhevm.createEncryptedInput(this.contractAddress, this.signers.alice.address);
     inputAlice.add64(1337);
     const encryptedAllowanceAmount = await inputAlice.encrypt();
     const tx = await this.erc20["approve(address,bytes32,bytes)"](
-      this.signers.bob,
+      this.signers.bob.address,
       encryptedAllowanceAmount.handles[0],
       encryptedAllowanceAmount.inputProof,
     );
@@ -129,8 +131,8 @@ describe("ConfidentialERC20", function () {
     inputBob1.add64(1338); // above allowance so next tx should actually not send any token
     const encryptedTransferAmount = await inputBob1.encrypt();
     const tx2 = await bobErc20["transferFrom(address,address,bytes32,bytes)"](
-      this.signers.alice,
-      this.signers.bob,
+      this.signers.alice.address,
+      this.signers.bob.address,
       encryptedTransferAmount.handles[0],
       encryptedTransferAmount.inputProof,
     );
@@ -155,8 +157,8 @@ describe("ConfidentialERC20", function () {
     inputBob2.add64(1337); // below allowance so next tx should send token
     const encryptedTransferAmount2 = await inputBob2.encrypt();
     const tx3 = await bobErc20["transferFrom(address,address,bytes32,bytes)"](
-      this.signers.alice,
-      this.signers.bob,
+      this.signers.alice.address,
+      this.signers.bob.address,
       encryptedTransferAmount2.handles[0],
       encryptedTransferAmount2.inputProof,
     );
@@ -178,17 +180,62 @@ describe("ConfidentialERC20", function () {
     expect(balanceBob2).to.equal(1337); // check that transfer did happen this time
   });
 
+  it("should allow making balance public", async function () {
+    // Initial token mint with confirmation
+    const mintTx = await this.erc20.mint(this.signers.alice.address, 1000);
+    const mintReceipt = await mintTx.wait();
+    expect(mintReceipt?.status).to.eq(1);
+  
+    // Make balance public with confirmation
+    const txPublic = await this.erc20.setPublicBalance(true, { gasLimit: 5_000_000 });
+    const publicReceipt = await txPublic.wait();
+    expect(publicReceipt?.status).to.eq(1);
+    
+    // Wait for decryption to complete
+    await awaitAllDecryptionResults();
+  
+    // Verify balance is public
+    expect(await this.erc20.isPublicBalance(this.signers.alice.address)).to.be.true;
+    
+    // Check decrypted value with retries
+    let exposedBalance;
+    for (let i = 0; i < 300; i++) { // Incrementa el número de reintentos
+      exposedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
+      if (exposedBalance.toString() === "1000") {
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Aumenta el tiempo entre intentos
+    }
+  
+    // Final verification
+    expect(exposedBalance).to.equal(1000, "Balance was not correctly exposed after multiple retries");
+  });
+
+  it("should allow hiding balance", async function () {
+    await this.erc20.mint(this.signers.alice.address, 1000);
+    await this.erc20.setPublicBalance(true);
+    await awaitAllDecryptionResults();
+
+    await this.erc20.setPublicBalance(false);
+    expect(await this.erc20.isPublicBalance(this.signers.alice.address)).to.be.false;
+
+    const exposedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
+    expect(exposedBalance).to.equal(0);
+  });
+
+  
+
   it("DEBUG - using debug.decrypt64 for debugging transfer", async function () {
     if (network.name === "hardhat") {
       // using the debug.decryptXX functions is possible only in mocked mode
 
-      const transaction = await this.erc20.mint(this.signers.alice, 1000);
+      const transaction = await this.erc20.mint(this.signers.alice.address, 1000);
       await transaction.wait();
       const input = this.fhevm.createEncryptedInput(this.contractAddress, this.signers.alice.address);
       input.add64(1337);
       const encryptedTransferAmount = await input.encrypt();
       const tx = await this.erc20["transfer(address,bytes32,bytes)"](
-        this.signers.bob,
+        this.signers.bob.address,
         encryptedTransferAmount.handles[0],
         encryptedTransferAmount.inputProof,
       );
