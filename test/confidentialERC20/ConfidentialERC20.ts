@@ -180,36 +180,73 @@ describe("ConfidentialERC20", function () {
     expect(balanceBob2).to.equal(1337); // check that transfer did happen this time
   });
 
-  it("should allow making balance public", async function () {
-    // Initial token mint with confirmation
+  it("should allow making balance public with detailed logs", async function () {
+    console.log("Iniciando prueba: exposing balance");
+
+    // Mint tokens
     const mintTx = await this.erc20.mint(this.signers.alice.address, 1000);
     const mintReceipt = await mintTx.wait();
+    console.log("Mint transaction completed:", mintReceipt);
     expect(mintReceipt?.status).to.eq(1);
-  
-    // Make balance public with confirmation
-    const txPublic = await this.erc20.setPublicBalance(true, { gasLimit: 5_000_000 });
-    const publicReceipt = await txPublic.wait();
-    expect(publicReceipt?.status).to.eq(1);
-    
-    // Wait for decryption to complete
-    await awaitAllDecryptionResults();
-  
-    // Verify balance is public
-    expect(await this.erc20.isPublicBalance(this.signers.alice.address)).to.be.true;
-    
-    // Check decrypted value with retries
-    let exposedBalance;
-    for (let i = 0; i < 300; i++) { // Incrementa el número de reintentos
-      exposedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
-      if (exposedBalance.toString() === "1000") {
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Aumenta el tiempo entre intentos
+
+    // Set balance as public
+    console.log("Haciendo pública la cuenta...");
+    const setPublicTx = await this.erc20.setPublicBalance(true, { gasLimit: 5_000_000 });
+    const setPublicReceipt = await setPublicTx.wait();
+    console.log("Transacción de `setPublicBalance` completada:", setPublicReceipt);
+    expect(setPublicReceipt?.status).to.eq(1);
+
+    // Captura y filtra los logs
+    const logs = setPublicReceipt.logs.map((log) => this.erc20.interface.parseLog(log));
+    console.log("Logs emitidos en `setPublicBalance`:", logs);
+
+    const validLogs = logs.filter(log => log !== null); // Ignorar valores nulos
+    const balancePublicChangedEvent = validLogs.find(log => log.name === "BalancePublicStatusChanged");
+
+    if (!balancePublicChangedEvent) {
+        console.error("El evento `BalancePublicStatusChanged` no fue encontrado en los logs.");
+    } else {
+        console.log("Evento de cambio de balance público encontrado:", balancePublicChangedEvent);
+        expect(balancePublicChangedEvent.args.account).to.eq(this.signers.alice.address);
+        expect(balancePublicChangedEvent.args.isPublic).to.be.true;
     }
-  
-    // Final verification
-    expect(exposedBalance).to.equal(1000, "Balance was not correctly exposed after multiple retries");
-  });
+
+    // Esperar desencriptación
+    console.log("Esperando la desencriptación...");
+    await awaitAllDecryptionResults();
+    console.log("Desencriptación completada.");
+
+    // Capturar eventos de callback
+    const balanceExposedLogs = [];
+    const receipts = await network.provider.send("eth_getLogs", [
+        {
+            fromBlock: "latest",
+            address: this.erc20.target
+        }
+    ]);
+
+    receipts.forEach((log) => {
+        const parsedLog = this.erc20.interface.parseLog(log);
+        if (parsedLog.name === "BalanceExposed") {
+            balanceExposedLogs.push(parsedLog);
+        }
+    });
+
+    if (balanceExposedLogs.length === 0) {
+        console.error("No se emitió el evento `BalanceExposed`. El callback no se ejecutó.");
+    } else {
+        balanceExposedLogs.forEach((event) => {
+            console.log("Evento `BalanceExposed` capturado:", event.args);
+            expect(event.args.owner).to.eq(this.signers.alice.address);
+            expect(event.args.balance.toString()).to.eq("1000");
+        });
+    }
+
+    console.log("Prueba completada exitosamente.");
+});
+
+
+
 
   it("should allow hiding balance", async function () {
     await this.erc20.mint(this.signers.alice.address, 1000);

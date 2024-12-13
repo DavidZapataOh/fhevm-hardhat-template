@@ -22,6 +22,7 @@ contract MyConfidentialERC20 is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintabl
     mapping(address => uint256) public exposedBalance;
 
     event BalanceExposed(uint256 indexed timestamp, address indexed owner, uint256 indexed balance);
+    event BalancePublicStatusChanged(address indexed account, bool isPublic);
 
     function setPublicBalance(bool isPublic) public {
         require(isPublicBalance[msg.sender] != isPublic, "Balance already set");
@@ -33,27 +34,26 @@ contract MyConfidentialERC20 is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintabl
         } else{
             requestExposeBalance(msg.sender);
         } 
+        emit BalancePublicStatusChanged(msg.sender, isPublic);
     }
 
     function requestExposeBalance(address account) internal {
-        require(
-            isPublicBalance[account],
-            "Private balance"
-        );
+        require(isPublicBalance[account], "Private balance");
         uint256[] memory cts = new uint256[](1);
         cts[0] = Gateway.toUint256(_balances[account]);
-        Gateway.requestDecryption(cts, this.callbackBalance.selector, 0, block.timestamp + 100, false);
+        Gateway.requestDecryption(cts, this.callbackBalance.selector, uint256(uint160(account)), block.timestamp + 100, false);
     }
 
-    function callbackBalance(uint256, uint32 exposedBalance_) public onlyGateway returns (uint32) {
-        exposedBalance[msg.sender] = exposedBalance_;
-        emit BalanceExposed(block.timestamp, msg.sender, exposedBalance[msg.sender]);
+    function callbackBalance(uint256 requestId, uint32 exposedBalance_) public onlyGateway returns (uint32) {
+        address user = address(uint160(requestId));
+        exposedBalance[user] = exposedBalance_;
+        emit BalanceExposed(block.timestamp, user, exposedBalance[user]);
         return exposedBalance_;
     }
 
     function exposeBalance(address account) public view returns (uint256) {
         require(
-            isPublicBalance[account] || account == msg.sender,
+            isPublicBalance[account],
             "Private balance"
         );
         return exposedBalance[account];
