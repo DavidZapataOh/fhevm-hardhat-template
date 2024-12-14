@@ -11,12 +11,16 @@ import "fhevm/gateway/GatewayCaller.sol";
 /// @notice This contract implements an encrypted ERC20-like token with confidential balances using Zama's FHE library.
 /// @dev It supports typical ERC20 functionality such as transferring tokens, minting, and setting allowances,
 /// @dev but uses encrypted data types.
-contract MyConfidentialERC20 is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintable, SepoliaZamaGatewayConfig, GatewayCaller {
+contract MyConfidentialERC20 is
+    SepoliaZamaFHEVMConfig,
+    ConfidentialERC20Mintable,
+    SepoliaZamaGatewayConfig,
+    GatewayCaller
+{
     /// @notice Constructor to initialize the token's name and symbol, and set up the owner
     /// @param name_ The name of the token
     /// @param symbol_ The symbol of the token
-    constructor(string memory name_, string memory symbol_) ConfidentialERC20Mintable(name_, symbol_, msg.sender) {
-}
+    constructor(string memory name_, string memory symbol_) ConfidentialERC20Mintable(name_, symbol_, msg.sender) {}
 
     mapping(address => bool) public isPublicBalance;
     mapping(address => uint256) public exposedBalance;
@@ -24,38 +28,28 @@ contract MyConfidentialERC20 is SepoliaZamaFHEVMConfig, ConfidentialERC20Mintabl
     event BalanceExposed(uint256 indexed timestamp, address indexed owner, uint256 indexed balance);
     event BalancePublicStatusChanged(address indexed account, bool isPublic);
 
-    function setPublicBalance(bool isPublic) public {
-        require(isPublicBalance[msg.sender] != isPublic, "Balance already set");
-
-        isPublicBalance[msg.sender] = isPublic;
-        
-        if (!isPublic) {
-            exposedBalance[msg.sender] = 0;
-        } else{
-            requestExposeBalance(msg.sender);
-        } 
-        emit BalancePublicStatusChanged(msg.sender, isPublic);
-    }
-
-    function requestExposeBalance(address account) internal {
-        require(isPublicBalance[account], "Private balance");
+    function requestExposeBalance() external {
         uint256[] memory cts = new uint256[](1);
-        cts[0] = Gateway.toUint256(_balances[account]);
-        Gateway.requestDecryption(cts, this.callbackBalance.selector, uint256(uint160(account)), block.timestamp + 100, false);
-    }
+        cts[0] = Gateway.toUint256(_balances[msg.sender]);
 
-    function callbackBalance(uint256 requestId, uint32 exposedBalance_) public onlyGateway returns (uint32) {
-        address user = address(uint160(requestId));
-        exposedBalance[user] = exposedBalance_;
-        emit BalanceExposed(block.timestamp, user, exposedBalance[user]);
-        return exposedBalance_;
-    }
-
-    function exposeBalance(address account) public view returns (uint256) {
-        require(
-            isPublicBalance[account],
-            "Private balance"
+        uint256 requestID = Gateway.requestDecryption(
+            cts,
+            this.callbackBalance.selector,
+            0,
+            block.timestamp + 100,
+            false
         );
-        return exposedBalance[account];
+
+        addParamsUint256(requestID, uint256(uint160(msg.sender)));
+    }
+
+    function callbackBalance(uint256 requestID, uint32 exposedBalance_) public onlyGateway returns (uint32) {
+        uint256[] memory params = getParamsUint256(requestID);
+
+        address user = address(uint160(params[0]));
+
+        exposedBalance[user] = exposedBalance_;
+        emit BalanceExposed(block.timestamp, user, exposedBalance_);
+        return exposedBalance_;
     }
 }

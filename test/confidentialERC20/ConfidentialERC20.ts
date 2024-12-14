@@ -1,12 +1,12 @@
 import { expect } from "chai";
 import { network } from "hardhat";
 
+import { awaitAllDecryptionResults, initGateway } from "../asyncDecrypt";
 import { createInstance } from "../instance";
 import { reencryptEuint64 } from "../reencrypt";
 import { getSigners, initSigners } from "../signers";
 import { debug } from "../utils";
 import { deployConfidentialERC20Fixture } from "./ConfidentialERC20.fixture";
-import { awaitAllDecryptionResults, initGateway } from "../asyncDecrypt";
 
 describe("ConfidentialERC20", function () {
   before(async function () {
@@ -180,112 +180,21 @@ describe("ConfidentialERC20", function () {
     expect(balanceBob2).to.equal(1337); // check that transfer did happen this time
   });
 
-  it("should allow making balance public with detailed logs", async function () {
-    console.log("Iniciando prueba: exposing balance");
+  it("should allow making balance public of user x", async function () {
+    const amountToMint = 1000;
 
-    // Mint tokens
-    const mintTx = await this.erc20.mint(this.signers.alice.address, 1000);
+    const mintTx = await this.erc20.mint(this.signers.alice.address, amountToMint);
     const mintReceipt = await mintTx.wait();
-    console.log("Mint transaction completed:", mintReceipt);
     expect(mintReceipt?.status).to.eq(1);
 
-    // Set balance as public
-    console.log("Haciendo pública la cuenta...");
-    const setPublicTx = await this.erc20.setPublicBalance(true, { gasLimit: 5_000_000 });
+    const aliceErc20 = this.erc20.connect(this.signers.alice);
+    const setPublicTx = await aliceErc20.requestExposeBalance();
     const setPublicReceipt = await setPublicTx.wait();
-    console.log("Transacción de `setPublicBalance` completada:", setPublicReceipt);
     expect(setPublicReceipt?.status).to.eq(1);
 
-    // Captura y filtra los logs
-    const logs = setPublicReceipt.logs.map((log) => this.erc20.interface.parseLog(log));
-    console.log("Logs emitidos en `setPublicBalance`:", logs);
-
-    const validLogs = logs.filter(log => log !== null); // Ignorar valores nulos
-    const balancePublicChangedEvent = validLogs.find(log => log.name === "BalancePublicStatusChanged");
-
-    if (!balancePublicChangedEvent) {
-        console.error("El evento `BalancePublicStatusChanged` no fue encontrado en los logs.");
-    } else {
-        console.log("Evento de cambio de balance público encontrado:", balancePublicChangedEvent);
-        expect(balancePublicChangedEvent.args.account).to.eq(this.signers.alice.address);
-        expect(balancePublicChangedEvent.args.isPublic).to.be.true;
-    }
-
-    // Esperar desencriptación
-    console.log("Esperando la desencriptación...");
-    await awaitAllDecryptionResults();
-    console.log("Desencriptación completada.");
-
-    // Capturar eventos de callback
-    const balanceExposedLogs = [];
-    const receipts = await network.provider.send("eth_getLogs", [
-        {
-            fromBlock: "latest",
-            address: this.erc20.target
-        }
-    ]);
-
-    receipts.forEach((log) => {
-        const parsedLog = this.erc20.interface.parseLog(log);
-        if (parsedLog.name === "BalanceExposed") {
-            balanceExposedLogs.push(parsedLog);
-        }
-    });
-
-    if (balanceExposedLogs.length === 0) {
-        console.error("No se emitió el evento `BalanceExposed`. El callback no se ejecutó.");
-    } else {
-        balanceExposedLogs.forEach((event) => {
-            console.log("Evento `BalanceExposed` capturado:", event.args);
-            expect(event.args.owner).to.eq(this.signers.alice.address);
-            expect(event.args.balance.toString()).to.eq("1000");
-        });
-    }
-
-    console.log("Prueba completada exitosamente.");
-});
-
-
-
-
-  it("should allow hiding balance", async function () {
-    await this.erc20.mint(this.signers.alice.address, 1000);
-    await this.erc20.setPublicBalance(true);
     await awaitAllDecryptionResults();
 
-    await this.erc20.setPublicBalance(false);
-    expect(await this.erc20.isPublicBalance(this.signers.alice.address)).to.be.false;
-
-    const exposedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
-    expect(exposedBalance).to.equal(0);
-  });
-
-  
-
-  it("DEBUG - using debug.decrypt64 for debugging transfer", async function () {
-    if (network.name === "hardhat") {
-      // using the debug.decryptXX functions is possible only in mocked mode
-
-      const transaction = await this.erc20.mint(this.signers.alice.address, 1000);
-      await transaction.wait();
-      const input = this.fhevm.createEncryptedInput(this.contractAddress, this.signers.alice.address);
-      input.add64(1337);
-      const encryptedTransferAmount = await input.encrypt();
-      const tx = await this.erc20["transfer(address,bytes32,bytes)"](
-        this.signers.bob.address,
-        encryptedTransferAmount.handles[0],
-        encryptedTransferAmount.inputProof,
-      );
-      await tx.wait();
-
-      const balanceHandleAlice = await this.erc20.balanceOf(this.signers.alice);
-      const balanceAlice = await debug.decrypt64(balanceHandleAlice);
-      expect(balanceAlice).to.equal(1000);
-
-      // Reencrypt Bob's balance
-      const balanceHandleBob = await this.erc20.balanceOf(this.signers.bob);
-      const balanceBob = await debug.decrypt64(balanceHandleBob);
-      expect(balanceBob).to.equal(0);
-    }
+    const decryptedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
+    expect(decryptedBalance).to.eq(amountToMint);
   });
 });
