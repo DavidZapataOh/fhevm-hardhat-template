@@ -197,4 +197,8 @@ describe("ConfidentialERC20", function () {
     const decryptedBalance = await this.erc20.exposedBalance(this.signers.alice.address);
     expect(decryptedBalance).to.eq(amountToMint);
   });
+
+  it("should not allow a random user to call the decrypt callback", async function () {
+    await expect(this.erc20.callbackBalance(33, 49)).to.be.revertedWith("Only Gateway");
+  });
 });
